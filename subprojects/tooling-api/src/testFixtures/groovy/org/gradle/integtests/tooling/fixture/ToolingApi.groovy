@@ -27,6 +27,7 @@ import org.gradle.tooling.GradleConnector
 import org.gradle.tooling.ProjectConnection
 import org.gradle.tooling.internal.consumer.ConnectorServices
 import org.gradle.tooling.internal.consumer.DefaultGradleConnector
+import org.gradle.tooling.model.build.BuildEnvironment
 import org.gradle.util.GradleVersion
 import org.junit.rules.TestRule
 import org.junit.runner.Description
@@ -162,22 +163,36 @@ class ToolingApi implements TestRule {
         } else {
             connector = GradleConnector.newConnector() as DefaultGradleConnector
         }
-        connector.useGradleUserHomeDir(new File(gradleUserHomeDir.path))
-        if (useSeparateDaemonBaseDir) {
-            connector.daemonBaseDir(new File(daemonBaseDir.path))
-        }
+
         connector.forProjectDirectory(testWorkDirProvider.testDirectory)
-        connector.searchUpwards(false)
-        connector.daemonMaxIdleTime(120, TimeUnit.SECONDS)
-        if (connector.metaClass.hasProperty(connector, 'verboseLogging')) {
-            connector.verboseLogging = verboseLogging
-        }
         if (useClasspathImplementation) {
             connector.useClasspathDistribution()
         } else {
             connector.useInstallation(dist.gradleHomeDir.absoluteFile)
         }
         connector.embedded(embedded)
+        connector.searchUpwards(false)
+        if (useSeparateDaemonBaseDir) {
+            connector.daemonBaseDir(new File(daemonBaseDir.path))
+        }
+        connector.daemonMaxIdleTime(120, TimeUnit.SECONDS)
+        if (connector.metaClass.hasProperty(connector, 'verboseLogging')) {
+            connector.verboseLogging = verboseLogging
+        }
+
+        if (gradleUserHomeDir != context.gradleUserHomeDir && embedded) {
+            // When using embedded mode with an isolated user home, first initialise the Gradle instance using the default user home dir
+            // This sets some some static state that uses files from the use home dir, such as DLLs
+            connector.useGradleUserHomeDir(new File(context.gradleUserHomeDir.path))
+            def connection = connector.connect()
+            try {
+                connection.getModel(BuildEnvironment.class)
+            } finally {
+                connection.close()
+            }
+        }
+
+        connector.useGradleUserHomeDir(new File(gradleUserHomeDir.path))
         connectorConfigurers.each {
             connector.with(it)
         }
