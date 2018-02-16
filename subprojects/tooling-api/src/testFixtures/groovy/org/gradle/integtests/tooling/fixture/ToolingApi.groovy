@@ -47,13 +47,13 @@ class ToolingApi implements TestRule {
     private boolean requiresDaemon
     private boolean requireIsolatedDaemons
     private DefaultServiceRegistry isolatedToolingClient
+    private context = new IntegrationTestBuildContext()
 
     private final List<Closure> connectorConfigurers = []
     boolean verboseLogging = LOGGER.debugEnabled
 
     ToolingApi(GradleDistribution dist, TestDirectoryProvider testWorkDirProvider) {
         this.dist = dist
-        def context = new IntegrationTestBuildContext()
         this.useSeparateDaemonBaseDir = dist.toolingApiDaemonBaseDirSupported && DefaultGradleConnector.metaClass.respondsTo(null, "daemonBaseDir")
         this.gradleUserHomeDir = context.gradleUserHomeDir
         this.daemonBaseDir = context.daemonBaseDir
@@ -189,7 +189,6 @@ class ToolingApi implements TestRule {
         return embedded && GradleVersion.current() == dist.version
     }
 
-
     /*
      * TODO Stefan the embedded executor has been broken by some
      * change after 3.0. It can no longer handle changes to the
@@ -206,7 +205,7 @@ class ToolingApi implements TestRule {
     Statement apply(Statement base, Description description) {
         return new Statement() {
             @Override
-            public void evaluate() throws Throwable {
+            void evaluate() throws Throwable {
                 try {
                     base.evaluate();
                 } finally {
@@ -226,6 +225,17 @@ class ToolingApi implements TestRule {
             } catch (RuntimeException ex) {
                 //TODO once we figured out why pid from logfile can be null we should remove this again
                 LOGGER.warn("Unable to kill daemon(s)", ex)
+            }
+        }
+        if (gradleUserHomeDir != context.gradleUserHomeDir) {
+            // When the user home directory is not the default for int tests, then the Gradle instance that was used during the test will still be holding some services open in the user home dir (this is by design), so kill off the Gradle instance that was used.
+            // If we ran in embedded mode, shutdown the embedded services
+            // If we used the daemons, kill the daemons
+            // Either way, this is expensive
+            if (embedded) {
+                ConnectorServices.reset()
+            } else {
+                getDaemons().killAll()
             }
         }
     }
